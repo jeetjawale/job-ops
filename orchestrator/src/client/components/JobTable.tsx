@@ -218,7 +218,7 @@ export const JobTable: React.FC<JobTableProps> = ({
 
           return (
             <TableRow key={job.id} data-state={isSelected ? "selected" : undefined}>
-              <TableCell className="align-top">
+              <TableCell className="align-middle">
                 <Checkbox
                   aria-label={`Select ${job.title}`}
                   checked={isSelected}
@@ -230,7 +230,7 @@ export const JobTable: React.FC<JobTableProps> = ({
                   }}
                 />
               </TableCell>
-              <TableCell className="align-top">
+              <TableCell className="align-middle">
                 <Button
                   asChild
                   variant="link"
@@ -243,7 +243,7 @@ export const JobTable: React.FC<JobTableProps> = ({
                 </Button>
               </TableCell>
 
-              <TableCell className="align-top whitespace-normal break-words">
+              <TableCell className="align-middle whitespace-normal break-words">
                 {job.employer}
               </TableCell>
 
@@ -253,7 +253,7 @@ export const JobTable: React.FC<JobTableProps> = ({
                 </Badge>
               </TableCell>
 
-              <TableCell className="align-top whitespace-normal break-words text-muted-foreground">
+              <TableCell className="align-middle whitespace-normal break-words text-muted-foreground">
                 {job.location || "—"}
               </TableCell>
 
