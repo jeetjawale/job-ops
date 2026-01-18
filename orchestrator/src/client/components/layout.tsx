@@ -3,7 +3,7 @@
  */
 
 import React, { useState } from "react";
-import { Link, useLocation } from "react-router-dom";
+import { Link, useLocation, useNavigate } from "react-router-dom";
 import { Briefcase, Home, LucideIcon, Menu, Settings, Shield } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
@@ -46,7 +46,17 @@ export const PageHeader: React.FC<PageHeaderProps> = ({
   actions,
 }) => {
   const location = useLocation();
+  const navigate = useNavigate();
   const [navOpen, setNavOpen] = useState(false);
+
+  const handleNavClick = (to: string) => {
+    if (location.pathname === to) {
+      setNavOpen(false);
+      return;
+    }
+    setNavOpen(false);
+    setTimeout(() => navigate(to), 150);
+  };
 
   return (
     <header className="sticky top-0 z-40 border-b bg-background/80 backdrop-blur supports-[backdrop-filter]:bg-background/60">
@@ -65,12 +75,12 @@ export const PageHeader: React.FC<PageHeaderProps> = ({
               </SheetHeader>
               <nav className="mt-6 flex flex-col gap-2">
                 {navLinks.map(({ to, label, icon: NavIcon }) => (
-                  <Link
+                  <button
                     key={to}
-                    to={to}
-                    onClick={() => setNavOpen(false)}
+                    type="button"
+                    onClick={() => handleNavClick(to)}
                     className={cn(
-                      "flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors hover:bg-accent hover:text-accent-foreground",
+                      "flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors hover:bg-accent hover:text-accent-foreground text-left",
                       location.pathname === to
                         ? "bg-accent text-accent-foreground"
                         : "text-muted-foreground"
@@ -78,7 +88,7 @@ export const PageHeader: React.FC<PageHeaderProps> = ({
                   >
                     <NavIcon className="h-4 w-4" />
                     {label}
-                  </Link>
+                  </button>
                 ))}
               </nav>
             </SheetContent>

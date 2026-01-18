@@ -21,7 +21,7 @@ import {
   Settings,
   Shield,
 } from "lucide-react";
-import { Link, useLocation } from "react-router-dom";
+import { Link, useLocation, useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 
 import { Badge } from "@/components/ui/badge";
@@ -90,6 +90,7 @@ const navLinks = [
 
 export const UkVisaJobsPage: React.FC = () => {
   const location = useLocation();
+  const navigate = useNavigate();
   const [navOpen, setNavOpen] = useState(false);
   const [searchTermInput, setSearchTermInput] = useState("");
   const [activeSearchTerm, setActiveSearchTerm] = useState<string | null>(null);
@@ -366,12 +367,19 @@ export const UkVisaJobsPage: React.FC = () => {
                 </SheetHeader>
                 <nav className="mt-6 flex flex-col gap-2">
                   {navLinks.map(({ to, label, icon: Icon }) => (
-                    <Link
+                    <button
                       key={to}
-                      to={to}
-                      onClick={() => setNavOpen(false)}
+                      type="button"
+                      onClick={() => {
+                        if (location.pathname === to) {
+                          setNavOpen(false);
+                          return;
+                        }
+                        setNavOpen(false);
+                        setTimeout(() => navigate(to), 150);
+                      }}
                       className={cn(
-                        "flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors hover:bg-accent hover:text-accent-foreground",
+                        "flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors hover:bg-accent hover:text-accent-foreground text-left",
                         location.pathname === to
                           ? "bg-accent text-accent-foreground"
                           : "text-muted-foreground"
@@ -379,7 +387,7 @@ export const UkVisaJobsPage: React.FC = () => {
                     >
                       <Icon className="h-4 w-4" />
                       {label}
-                    </Link>
+                    </button>
                   ))}
                 </nav>
               </SheetContent>

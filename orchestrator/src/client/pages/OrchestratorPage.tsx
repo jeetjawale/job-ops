@@ -29,7 +29,7 @@ import {
   Sparkles,
   XCircle,
 } from "lucide-react";
-import { Link, useLocation } from "react-router-dom";
+import { Link, useLocation, useNavigate } from "react-router-dom";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { toast } from "sonner";
@@ -304,6 +304,7 @@ const ScoreMeter: React.FC<{ score: number | null }> = ({ score }) => {
 
 export const OrchestratorPage: React.FC = () => {
   const location = useLocation();
+  const navigate = useNavigate();
   const [navOpen, setNavOpen] = useState(false);
   const [jobs, setJobs] = useState<Job[]>([]);
   const [stats, setStats] = useState<Record<JobStatus, number>>({
@@ -1078,11 +1079,18 @@ export const OrchestratorPage: React.FC = () => {
                 </SheetHeader>
                 <nav className="mt-6 flex flex-col gap-2">
                   {navLinks.map(({ to, label, icon: Icon }) => (
-                    <Link
+                    <button
                       key={to}
-                      to={to}
-                      onClick={() => setNavOpen(false)}
-                      className={`flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors hover:bg-accent hover:text-accent-foreground ${
+                      type="button"
+                      onClick={() => {
+                        if (location.pathname === to) {
+                          setNavOpen(false);
+                          return;
+                        }
+                        setNavOpen(false);
+                        setTimeout(() => navigate(to), 150);
+                      }}
+                      className={`flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors hover:bg-accent hover:text-accent-foreground text-left ${
                         location.pathname === to
                           ? "bg-accent text-accent-foreground"
                           : "text-muted-foreground"
@@ -1090,7 +1098,7 @@ export const OrchestratorPage: React.FC = () => {
                     >
                       <Icon className="h-4 w-4" />
                       {label}
-                    </Link>
+                    </button>
                   ))}
                 </nav>
               </SheetContent>
