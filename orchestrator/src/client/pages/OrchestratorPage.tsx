@@ -25,7 +25,7 @@ import { usePipelineSources } from "./orchestrator/usePipelineSources";
 import { getJobCounts } from "./orchestrator/utils";
 
 export const OrchestratorPage: React.FC = () => {
-  const { tab } = useParams<{ tab: string }>();
+  const { tab, jobId } = useParams<{ tab: string; jobId?: string }>();
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
 
@@ -36,6 +36,19 @@ export const OrchestratorPage: React.FC = () => {
     }
     return "ready";
   }, [tab]);
+
+  // Helper to change URL while preserving search params
+  const navigateWithContext = useCallback(
+    (newTab: string, newJobId?: string | null, isReplace = false) => {
+      const search = searchParams.toString();
+      const suffix = search ? `?${search}` : "";
+      const path = newJobId ? `/${newTab}/${newJobId}${suffix}` : `/${newTab}${suffix}`;
+      navigate(path, { replace: isReplace });
+    },
+    [navigate, searchParams],
+  );
+
+  const selectedJobId = jobId || null;
 
   // Sync searchQuery with URL
   const searchQuery = searchParams.get("q") || "";
@@ -85,20 +98,23 @@ export const OrchestratorPage: React.FC = () => {
   useEffect(() => {
     const validTabs: FilterTab[] = ["ready", "discovered", "applied", "all"];
     if (tab && !validTabs.includes(tab as FilterTab)) {
-      navigate("/ready", { replace: true });
+      navigateWithContext("ready", null, true);
     }
-  }, [tab, navigate]);
+  }, [tab, navigateWithContext]);
 
   const [navOpen, setNavOpen] = useState(false);
   const [isManualImportOpen, setIsManualImportOpen] = useState(false);
-  const [selectedJobId, setSelectedJobId] = useState<string | null>(null);
   const [isDetailDrawerOpen, setIsDetailDrawerOpen] = useState(false);
   const [isDesktop, setIsDesktop] = useState(
     () => (typeof window !== "undefined" ? window.matchMedia("(min-width: 1024px)").matches : false),
   );
 
   const setActiveTab = (newTab: FilterTab) => {
-    navigate(`/${newTab}`);
+    navigateWithContext(newTab, selectedJobId);
+  };
+
+  const handleSelectJobId = (id: string | null) => {
+    navigateWithContext(activeTab, id);
   };
 
   const { pipelineSources, setPipelineSources, toggleSource } = usePipelineSources();
@@ -112,13 +128,12 @@ export const OrchestratorPage: React.FC = () => {
   );
 
   const handleManualImported = useCallback(
-    async (jobId: string) => {
-      setActiveTab("discovered");
-      setSourceFilter("all");
+    async (importedJobId: string) => {
+      // Refresh jobs and navigate to the new job in discovered tab
       await loadJobs();
-      setSelectedJobId(jobId);
+      navigateWithContext("discovered", importedJobId);
     },
-    [loadJobs],
+    [loadJobs, navigateWithContext],
   );
 
   const handleRunPipeline = async () => {
@@ -149,8 +164,8 @@ export const OrchestratorPage: React.FC = () => {
     }
   };
 
-  const handleSelectJob = (jobId: string) => {
-    setSelectedJobId(jobId);
+  const handleSelectJob = (id: string) => {
+    handleSelectJobId(id);
     if (!isDesktop) {
       setIsDetailDrawerOpen(true);
     }
@@ -158,19 +173,24 @@ export const OrchestratorPage: React.FC = () => {
 
   useEffect(() => {
     if (activeJobs.length === 0) {
-      setSelectedJobId(null);
+      if (selectedJobId) handleSelectJobId(null);
       return;
     }
     if (!selectedJobId || !activeJobs.some((job) => job.id === selectedJobId)) {
-      setSelectedJobId(activeJobs[0].id);
+      // Auto-select first job ONLY on desktop
+      if (isDesktop) {
+        navigateWithContext(activeTab, activeJobs[0].id, true);
+      }
     }
-  }, [activeJobs, selectedJobId]);
+  }, [activeJobs, selectedJobId, isDesktop, activeTab, navigateWithContext]);
 
   useEffect(() => {
     if (!selectedJobId) {
       setIsDetailDrawerOpen(false);
+    } else if (!isDesktop) {
+      setIsDetailDrawerOpen(true);
     }
-  }, [selectedJobId]);
+  }, [selectedJobId, isDesktop]);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -190,6 +210,14 @@ export const OrchestratorPage: React.FC = () => {
       setIsDetailDrawerOpen(false);
     }
   }, [isDesktop, isDetailDrawerOpen]);
+
+  const onDrawerOpenChange = (open: boolean) => {
+    setIsDetailDrawerOpen(open);
+    if (!open && !isDesktop) {
+      // Clear job ID from URL when closing drawer on mobile
+      handleSelectJobId(null);
+    }
+  };
 
   return (
     <>
@@ -241,7 +269,7 @@ export const OrchestratorPage: React.FC = () => {
                   activeTab={activeTab}
                   activeJobs={activeJobs}
                   selectedJob={selectedJob}
-                  onSelectJobId={setSelectedJobId}
+                  onSelectJobId={handleSelectJobId}
                   onJobUpdated={loadJobs}
                   onSetActiveTab={setActiveTab}
                 />
@@ -258,7 +286,7 @@ export const OrchestratorPage: React.FC = () => {
       />
 
       {!isDesktop && (
-        <Drawer open={isDetailDrawerOpen} onOpenChange={setIsDetailDrawerOpen}>
+        <Drawer open={isDetailDrawerOpen} onOpenChange={onDrawerOpenChange}>
           <DrawerContent className="max-h-[90vh]">
             <div className="flex items-center justify-between px-4 pt-2">
               <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Job details</div>
@@ -273,7 +301,7 @@ export const OrchestratorPage: React.FC = () => {
                 activeTab={activeTab}
                 activeJobs={activeJobs}
                 selectedJob={selectedJob}
-                onSelectJobId={setSelectedJobId}
+                onSelectJobId={handleSelectJobId}
                 onJobUpdated={loadJobs}
                 onSetActiveTab={setActiveTab}
               />

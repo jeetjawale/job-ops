@@ -42,6 +42,7 @@ export const App: React.FC = () => {
               <Route path="/ukvisajobs" element={<UkVisaJobsPage />} />
               <Route path="/visa-sponsors" element={<VisaSponsorsPage />} />
               <Route path="/:tab" element={<OrchestratorPage />} />
+              <Route path="/:tab/:jobId" element={<OrchestratorPage />} />
             </Routes>
           </div>
         </CSSTransition>
