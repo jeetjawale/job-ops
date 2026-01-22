@@ -1,11 +1,12 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { Check } from "lucide-react"
 import { toast } from "sonner"
 
 import { AlertDialog, AlertDialogContent, AlertDialogDescription, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog"
-import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { Separator } from "@/components/ui/separator"
+import { Progress } from "@/components/ui/progress"
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { cn } from "@/lib/utils"
 import * as api from "@client/api"
 import { useSettings } from "@client/hooks/useSettings"
@@ -13,33 +14,13 @@ import { SettingsInput } from "@client/pages/settings/components/SettingsInput"
 import { formatSecretHint } from "@client/pages/settings/utils"
 import type { ProfileStatusResponse, ResumeProfile } from "@shared/types"
 
-type RequirementRowProps = {
-  label: string
-  helper?: string
-  complete: boolean
-}
-
-const RequirementRow: React.FC<RequirementRowProps> = ({ label, helper, complete }) => (
-  <div className="flex items-start justify-between gap-4 rounded-lg border bg-muted/20 px-4 py-3">
-    <div className="space-y-1">
-      <p className="text-sm font-medium text-foreground">{label}</p>
-      {helper && <p className="text-xs text-muted-foreground">{helper}</p>}
-    </div>
-    <Badge
-      variant={complete ? "secondary" : "outline"}
-      className={cn("uppercase tracking-[0.18em] text-[0.6rem]", complete ? "text-foreground" : "text-muted-foreground")}
-    >
-      {complete ? "Ready" : "Next"}
-    </Badge>
-  </div>
-)
-
 export const OnboardingGate: React.FC = () => {
   const { settings, isLoading: settingsLoading, refreshSettings } = useSettings()
   const [profileStatus, setProfileStatus] = useState<ProfileStatusResponse | null>(null)
   const [isCheckingProfile, setIsCheckingProfile] = useState(false)
   const [isSavingEnv, setIsSavingEnv] = useState(false)
   const [isUploadingResume, setIsUploadingResume] = useState(false)
+  const [currentStep, setCurrentStep] = useState<string | null>(null)
 
   const [openrouterApiKey, setOpenrouterApiKey] = useState("")
   const [rxresumeEmail, setRxresumeEmail] = useState("")
@@ -83,6 +64,39 @@ export const OnboardingGate: React.FC = () => {
     ? formatSecretHint(settings.rxresumePasswordHint)
     : undefined
 
+  const steps = useMemo(
+    () => [
+      {
+        id: "openrouter",
+        label: "Connect AI",
+        subtitle: "OpenRouter key",
+        complete: hasOpenrouterKey,
+      },
+      {
+        id: "rxresume",
+        label: "PDF Export",
+        subtitle: "RxResume login",
+        complete: hasRxresumeCredentials,
+      },
+      {
+        id: "resume",
+        label: "Resume JSON",
+        subtitle: "Upload your file",
+        complete: hasBaseResume,
+      },
+    ],
+    [hasBaseResume, hasOpenrouterKey, hasRxresumeCredentials]
+  )
+
+  const defaultStep = steps.find((step) => !step.complete)?.id ?? steps[0]?.id
+
+  useEffect(() => {
+    if (!shouldOpen) return
+    if (!currentStep && defaultStep) {
+      setCurrentStep(defaultStep)
+    }
+  }, [currentStep, defaultStep, shouldOpen])
+
   const handleRefresh = async () => {
     const results = await Promise.allSettled([refreshSettings(), refreshProfileStatus()])
     const failed = results.find((result) => result.status === "rejected")
@@ -93,59 +107,73 @@ export const OnboardingGate: React.FC = () => {
     }
   }
 
-  const handleSaveCredentials = async () => {
-    if (!settings) return
-    const update: { openrouterApiKey?: string; rxresumeEmail?: string; rxresumePassword?: string } = {}
+  const handleSaveOpenrouter = async (): Promise<boolean> => {
     const openrouterValue = openrouterApiKey.trim()
+    if (hasOpenrouterKey && !openrouterValue) return true
+    if (!openrouterValue) {
+      toast.info("Add your OpenRouter API key to continue")
+      return false
+    }
+
+    try {
+      setIsSavingEnv(true)
+      await api.updateSettings({ openrouterApiKey: openrouterValue })
+      await refreshSettings()
+      setOpenrouterApiKey("")
+      toast.success("OpenRouter connected")
+      return true
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Failed to save OpenRouter key"
+      toast.error(message)
+      return false
+    } finally {
+      setIsSavingEnv(false)
+    }
+  }
+
+  const handleSaveRxresume = async (): Promise<boolean> => {
     const emailValue = rxresumeEmail.trim()
     const passwordValue = rxresumePassword.trim()
-
     const missing: string[] = []
 
-    if (!hasOpenrouterKey && !openrouterValue) {
-      missing.push("OpenRouter API key")
-    }
-
-    if (!hasRxresumeCredentials) {
-      if (!hasRxresumeEmail && !emailValue) missing.push("RxResume email")
-      if (!hasRxresumePassword && !passwordValue) missing.push("RxResume password")
-    }
+    if (!hasRxresumeEmail && !emailValue) missing.push("RxResume email")
+    if (!hasRxresumePassword && !passwordValue) missing.push("RxResume password")
 
     if (missing.length > 0) {
       toast.info("Almost there", {
         description: `Missing: ${missing.join(", ")}`,
       })
-      return
+      return false
     }
 
-    if (openrouterValue) update.openrouterApiKey = openrouterValue
+    const update: { rxresumeEmail?: string; rxresumePassword?: string } = {}
     if (emailValue) update.rxresumeEmail = emailValue
     if (passwordValue) update.rxresumePassword = passwordValue
 
     if (Object.keys(update).length === 0) {
-      toast.info("Nothing new to save")
-      return
+      return true
     }
 
     try {
       setIsSavingEnv(true)
       await api.updateSettings(update)
       await refreshSettings()
-      setOpenrouterApiKey("")
       setRxresumePassword("")
-      toast.success("Credentials saved")
+      toast.success("RxResume connected")
+      return true
     } catch (error) {
-      const message = error instanceof Error ? error.message : "Failed to save credentials"
+      const message = error instanceof Error ? error.message : "Failed to save RxResume credentials"
       toast.error(message)
+      return false
     } finally {
       setIsSavingEnv(false)
     }
   }
 
-  const handleUploadResume = async () => {
+  const handleUploadResume = async (): Promise<boolean> => {
     if (!resumeFile) {
       toast.info("Choose your base.json file")
-      return
+      return false
     }
 
     try {
@@ -165,159 +193,204 @@ export const OnboardingGate: React.FC = () => {
         fileInputRef.current.value = ""
       }
       toast.success("Resume uploaded")
+      return true
     } catch (error) {
       const message = error instanceof Error ? error.message : "Failed to upload resume"
       toast.error(message)
+      return false
     } finally {
       setIsUploadingResume(false)
     }
   }
 
   const resumeFileName = resumeFile?.name || ""
+  const resolvedStepIndex = currentStep ? steps.findIndex((step) => step.id === currentStep) : 0
+  const stepIndex = resolvedStepIndex >= 0 ? resolvedStepIndex : 0
+  const completedSteps = steps.filter((step) => step.complete).length
+  const progressValue = steps.length > 0 ? Math.round((completedSteps / steps.length) * 100) : 0
+  const isBusy = isSavingEnv || isUploadingResume || settingsLoading || isCheckingProfile
+  const canGoBack = stepIndex > 0
+  const canGoForward = stepIndex < steps.length - 1
+  const primaryLabel = currentStep === "resume"
+    ? (hasBaseResume ? "Finish" : "Upload and finish")
+    : (currentStep === "openrouter" && !hasOpenrouterKey) || (currentStep === "rxresume" && !hasRxresumeCredentials)
+      ? "Save"
+      : "Continue"
 
-  const checklist = useMemo(
-    () => [
-      {
-        label: "OpenRouter API key",
-        helper: "Needed for scoring + tailoring",
-        complete: hasOpenrouterKey,
-      },
-      {
-        label: "RxResume credentials",
-        helper: "Used to export PDFs",
-        complete: hasRxresumeCredentials,
-      },
-      {
-        label: "Base resume JSON",
-        helper: "Upload resume-generator/base.json",
-        complete: hasBaseResume,
-      },
-    ],
-    [hasBaseResume, hasOpenrouterKey, hasRxresumeCredentials]
-  )
+  const handlePrimaryAction = async () => {
+    if (!currentStep) return
+    if (currentStep === "openrouter") {
+      await handleSaveOpenrouter()
+      return
+    }
+    if (currentStep === "rxresume") {
+      await handleSaveRxresume()
+      return
+    }
+    if (currentStep === "resume") {
+      if (hasBaseResume) {
+        await handleRefresh()
+        return
+      }
+      await handleUploadResume()
+    }
+  }
 
-  if (!shouldOpen) return null
+  const handleBack = () => {
+    if (!canGoBack) return
+    setCurrentStep(steps[stepIndex - 1]?.id ?? currentStep)
+  }
+
+  if (!shouldOpen || !currentStep) return null
 
   return (
     <AlertDialog open>
       <AlertDialogContent
-        className="max-w-2xl max-h-[85vh] overflow-y-auto"
+        className="max-w-3xl max-h-[90vh] overflow-hidden p-0"
         onEscapeKeyDown={(event) => event.preventDefault()}
         onPointerDownOutside={(event) => event.preventDefault()}
         onInteractOutside={(event) => event.preventDefault()}
       >
-        <AlertDialogHeader>
-          <AlertDialogTitle>Welcome to Job Ops</AlertDialogTitle>
-          <AlertDialogDescription>
-            Let’s get your workspace ready. Add your keys and resume once, then the pipeline can run end-to-end.
-          </AlertDialogDescription>
-        </AlertDialogHeader>
+        <div className="space-y-6 px-6 py-6 max-h-[calc(90vh-3.5rem)] overflow-y-auto">
+          <AlertDialogHeader>
+            <AlertDialogTitle>Welcome to Job Ops</AlertDialogTitle>
+            <AlertDialogDescription>
+              Let’s get your workspace ready. Add your keys and resume once, then the pipeline can run end-to-end.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
 
-        <div className="space-y-6">
-          <div className="space-y-3">
-            <div className="flex items-center justify-between">
-              <p className="text-sm font-semibold">Quick setup checklist</p>
-              <Button variant="ghost" size="sm" onClick={handleRefresh} disabled={settingsLoading || isCheckingProfile}>
-                Refresh status
-              </Button>
-            </div>
-            <div className="space-y-2">
-              {checklist.map((item) => (
-                <RequirementRow key={item.label} {...item} />
-              ))}
-            </div>
-          </div>
+          <Tabs value={currentStep} onValueChange={setCurrentStep}>
+            <TabsList className="grid h-auto w-full grid-cols-1 rounded-none border-b border-border/60 bg-transparent p-0 text-left sm:grid-cols-3">
+              {steps.map((step, index) => {
+                const isActive = step.id === currentStep
+                const isComplete = step.complete
 
-          <Separator />
+                return (
+                  <TabsTrigger
+                    key={step.id}
+                    value={step.id}
+                    className={cn(
+                      "flex h-auto flex-col items-start gap-2 rounded-none border-b-2 border-transparent px-2 py-4 text-xs text-muted-foreground shadow-none transition-none",
+                      isActive && "border-primary text-foreground",
+                      !isActive && "hover:text-foreground"
+                    )}
+                  >
+                    <div className="flex items-center gap-2">
+                      <span
+                        className={cn(
+                          "flex h-6 w-6 items-center justify-center rounded-md text-xs font-semibold",
+                          isComplete
+                            ? "bg-primary text-primary-foreground"
+                            : isActive
+                              ? "bg-foreground/10 text-foreground"
+                              : "bg-muted text-muted-foreground"
+                        )}
+                      >
+                        {isComplete ? <Check className="h-3.5 w-3.5" /> : index + 1}
+                      </span>
+                      <span className="text-[0.7rem] font-semibold uppercase tracking-[0.2em]">
+                        {step.label}
+                      </span>
+                    </div>
+                    <span className="pl-8 text-[0.7rem] text-muted-foreground">{step.subtitle}</span>
+                  </TabsTrigger>
+                )
+              })}
+            </TabsList>
 
-          <div className="space-y-4">
-            <div>
-              <p className="text-sm font-semibold">OpenRouter</p>
-              <p className="text-xs text-muted-foreground">Used for job scoring, summaries, and tailoring.</p>
-            </div>
-            <SettingsInput
-              label="OpenRouter API key"
-              inputProps={{
-                name: "openrouterApiKey",
-                value: openrouterApiKey,
-                onChange: (event) => setOpenrouterApiKey(event.target.value),
-              }}
-              type="password"
-              placeholder="sk-or-v1..."
-              current={openrouterCurrent}
-              helper="Create a key at openrouter.ai"
-              disabled={isSavingEnv}
-            />
-          </div>
-
-          <Separator />
-
-          <div className="space-y-4">
-            <div>
-              <p className="text-sm font-semibold">RxResume account</p>
-              <p className="text-xs text-muted-foreground">Used to export tailored PDFs.</p>
-            </div>
-            <div className="grid gap-4 md:grid-cols-2">
+            <TabsContent value="openrouter" className="space-y-4 pt-6">
+              <div>
+                <p className="text-sm font-semibold">Connect OpenRouter</p>
+                <p className="text-xs text-muted-foreground">Used for job scoring, summaries, and tailoring.</p>
+              </div>
               <SettingsInput
-                label="Email"
+                label="OpenRouter API key"
                 inputProps={{
-                  name: "rxresumeEmail",
-                  value: rxresumeEmail,
-                  onChange: (event) => setRxresumeEmail(event.target.value),
-                }}
-                placeholder="you@example.com"
-                current={rxresumeEmailCurrent}
-                disabled={isSavingEnv}
-              />
-              <SettingsInput
-                label="Password"
-                inputProps={{
-                  name: "rxresumePassword",
-                  value: rxresumePassword,
-                  onChange: (event) => setRxresumePassword(event.target.value),
+                  name: "openrouterApiKey",
+                  value: openrouterApiKey,
+                  onChange: (event) => setOpenrouterApiKey(event.target.value),
                 }}
                 type="password"
-                placeholder="Enter password"
-                current={rxresumePasswordCurrent}
+                placeholder="sk-or-v1..."
+                current={openrouterCurrent}
+                helper="Create a key at openrouter.ai"
                 disabled={isSavingEnv}
               />
-            </div>
-            <div className="flex justify-end">
-              <Button onClick={handleSaveCredentials} disabled={isSavingEnv}>
-                {isSavingEnv ? "Saving..." : "Save and continue"}
-              </Button>
-            </div>
-          </div>
+            </TabsContent>
 
-          <Separator />
-
-          <div className="space-y-4">
-            <div>
-              <p className="text-sm font-semibold">Base resume JSON</p>
-              <p className="text-xs text-muted-foreground">Upload your RxResume export named base.json.</p>
-            </div>
-            <div className="grid gap-3 md:grid-cols-[1fr_auto] md:items-end">
-              <div className="space-y-2">
-                <label htmlFor="resumeFile" className="text-sm font-medium">
-                  base.json
-                </label>
-                <Input
-                  id="resumeFile"
-                  ref={fileInputRef}
-                  type="file"
-                  accept="application/json,.json"
-                  onChange={(event) => setResumeFile(event.target.files?.[0] ?? null)}
-                  disabled={isUploadingResume}
-                />
-                {resumeFileName && (
-                  <p className="text-xs text-muted-foreground">Selected: {resumeFileName}</p>
-                )}
+            <TabsContent value="rxresume" className="space-y-4 pt-6">
+              <div>
+                <p className="text-sm font-semibold">Link your RxResume account</p>
+                <p className="text-xs text-muted-foreground">Used to export tailored PDFs.</p>
               </div>
-              <Button onClick={handleUploadResume} disabled={isUploadingResume}>
-                {isUploadingResume ? "Uploading..." : "Upload resume"}
+              <div className="grid gap-4 md:grid-cols-2">
+                <SettingsInput
+                  label="Email"
+                  inputProps={{
+                    name: "rxresumeEmail",
+                    value: rxresumeEmail,
+                    onChange: (event) => setRxresumeEmail(event.target.value),
+                  }}
+                  placeholder="you@example.com"
+                  current={rxresumeEmailCurrent}
+                  disabled={isSavingEnv}
+                />
+                <SettingsInput
+                  label="Password"
+                  inputProps={{
+                    name: "rxresumePassword",
+                    value: rxresumePassword,
+                    onChange: (event) => setRxresumePassword(event.target.value),
+                  }}
+                  type="password"
+                  placeholder="Enter password"
+                  current={rxresumePasswordCurrent}
+                  disabled={isSavingEnv}
+                />
+              </div>
+            </TabsContent>
+
+            <TabsContent value="resume" className="space-y-4 pt-6">
+              <div>
+                <p className="text-sm font-semibold">Upload your resume JSON</p>
+                <p className="text-xs text-muted-foreground">Use the JSON export you downloaded from v4.rxresu.me.</p>
+              </div>
+              <div className="grid gap-3 md:grid-cols-[1fr_auto] md:items-end">
+                <div className="space-y-2">
+                  <label htmlFor="resumeFile" className="text-sm font-medium">
+                    Resume JSON
+                  </label>
+                  <Input
+                    id="resumeFile"
+                    ref={fileInputRef}
+                    type="file"
+                    accept="application/json,.json"
+                    onChange={(event) => setResumeFile(event.target.files?.[0] ?? null)}
+                    disabled={isUploadingResume}
+                  />
+                  {resumeFileName && (
+                    <p className="text-xs text-muted-foreground">Selected: {resumeFileName}</p>
+                  )}
+                </div>
+              </div>
+            </TabsContent>
+          </Tabs>
+
+          <div className="flex items-center justify-between">
+            <Button variant="outline" onClick={handleBack} disabled={!canGoBack || isBusy}>
+              Back
+            </Button>
+            <div className="flex items-center gap-2">
+              <Button variant="ghost" onClick={handleRefresh} disabled={isBusy}>
+                Refresh status
+              </Button>
+              <Button onClick={handlePrimaryAction} disabled={isBusy}>
+                {isBusy ? "Working..." : primaryLabel}
               </Button>
             </div>
           </div>
+
+          <Progress value={progressValue} className="h-2" />
 
           <div className="rounded-lg border border-muted bg-muted/30 p-3 text-xs text-muted-foreground">
             Friendly heads-up: pipelines can be slow or a little flaky in alpha. If anything feels off, open a GitHub issue and
