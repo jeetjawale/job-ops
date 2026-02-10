@@ -76,6 +76,92 @@ describe("discoverJobsStep", () => {
     );
   });
 
+  it("passes glassdoor through to JobSpy when selected", async () => {
+    const settingsRepo = await import("../../repositories/settings");
+    const jobSpy = await import("../../services/jobspy");
+
+    vi.mocked(settingsRepo.getAllSettings).mockResolvedValue({
+      searchTerms: JSON.stringify(["engineer"]),
+      jobspySites: JSON.stringify(["glassdoor"]),
+    } as any);
+
+    vi.mocked(jobSpy.runJobSpy).mockResolvedValue({
+      success: true,
+      jobs: [
+        {
+          source: "glassdoor",
+          title: "Engineer",
+          employer: "ACME",
+          jobUrl: "https://example.com/job",
+        },
+      ],
+    } as any);
+
+    const result = await discoverJobsStep({
+      mergedConfig: {
+        ...config,
+        sources: ["glassdoor"],
+      },
+    });
+
+    expect(result.discoveredJobs).toHaveLength(1);
+    expect(vi.mocked(jobSpy.runJobSpy)).toHaveBeenCalledWith(
+      expect.objectContaining({ sites: ["glassdoor"] }),
+    );
+  });
+
+  it("keeps glassdoor enabled even when jobspySites override omits it", async () => {
+    const settingsRepo = await import("../../repositories/settings");
+    const jobSpy = await import("../../services/jobspy");
+
+    vi.mocked(settingsRepo.getAllSettings).mockResolvedValue({
+      searchTerms: JSON.stringify(["engineer"]),
+      jobspySites: JSON.stringify(["linkedin"]),
+    } as any);
+
+    vi.mocked(jobSpy.runJobSpy).mockResolvedValue({
+      success: true,
+      jobs: [],
+    } as any);
+
+    await discoverJobsStep({
+      mergedConfig: {
+        ...config,
+        sources: ["glassdoor", "linkedin"],
+      },
+    });
+
+    expect(vi.mocked(jobSpy.runJobSpy)).toHaveBeenCalledWith(
+      expect.objectContaining({ sites: ["glassdoor", "linkedin"] }),
+    );
+  });
+
+  it("filters out glassdoor for unsupported countries", async () => {
+    const settingsRepo = await import("../../repositories/settings");
+    const jobSpy = await import("../../services/jobspy");
+
+    vi.mocked(settingsRepo.getAllSettings).mockResolvedValue({
+      searchTerms: JSON.stringify(["engineer"]),
+      jobspyCountryIndeed: "japan",
+    } as any);
+
+    vi.mocked(jobSpy.runJobSpy).mockResolvedValue({
+      success: true,
+      jobs: [],
+    } as any);
+
+    await discoverJobsStep({
+      mergedConfig: {
+        ...config,
+        sources: ["glassdoor", "linkedin"],
+      },
+    });
+
+    expect(vi.mocked(jobSpy.runJobSpy)).toHaveBeenCalledWith(
+      expect.objectContaining({ sites: ["linkedin"] }),
+    );
+  });
+
   it("throws when all enabled sources fail", async () => {
     const settingsRepo = await import("../../repositories/settings");
     const ukVisa = await import("../../services/ukvisajobs");

@@ -8,7 +8,7 @@ import { JobspySection } from "./JobspySection";
 const JobspyHarness = () => {
   const methods = useForm<UpdateSettingsInput>({
     defaultValues: {
-      jobspySites: ["indeed", "linkedin"],
+      jobspySites: ["indeed", "linkedin", "glassdoor"],
       jobspyLocation: "UK",
       jobspyResultsWanted: 200,
       jobspyHoursOld: 72,
@@ -24,8 +24,8 @@ const JobspyHarness = () => {
         <JobspySection
           values={{
             sites: {
-              default: ["indeed", "linkedin"],
-              effective: ["indeed", "linkedin"],
+              default: ["indeed", "linkedin", "glassdoor"],
+              effective: ["indeed", "linkedin", "glassdoor"],
             },
             location: { default: "UK", effective: "UK" },
             resultsWanted: { default: 200, effective: 200 },
@@ -51,6 +51,7 @@ describe("JobspySection", () => {
 
     expect(indeedCheckbox).toBeChecked();
     expect(linkedinCheckbox).toBeChecked();
+    expect(screen.queryByLabelText(/glassdoor/i)).not.toBeInTheDocument();
 
     fireEvent.click(indeedCheckbox);
     expect(indeedCheckbox).not.toBeChecked();

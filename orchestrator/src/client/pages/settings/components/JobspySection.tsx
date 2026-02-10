@@ -43,6 +43,12 @@ export const JobspySection: React.FC<JobspySectionProps> = ({
     linkedinFetchDescription,
     isRemote,
   } = values;
+  const configurableDefaultSites = sites.default.filter(
+    (site) => site !== "glassdoor",
+  );
+  const configurableEffectiveSites = sites.effective.filter(
+    (site) => site !== "glassdoor",
+  );
   const {
     control,
     register,
@@ -130,13 +136,13 @@ export const JobspySection: React.FC<JobspySectionProps> = ({
               </p>
             )}
             <div className="text-xs text-muted-foreground">
-              Select which sites JobSpy should scrape.
+              Select configurable sites JobSpy should scrape.
             </div>
             <div className="flex gap-2 text-xs text-muted-foreground">
               <span>
-                Effective: {(sites.effective || []).join(", ") || "None"}
+                Effective: {configurableEffectiveSites.join(", ") || "None"}
               </span>
-              <span>Default: {(sites.default || []).join(", ")}</span>
+              <span>Default: {configurableDefaultSites.join(", ")}</span>
             </div>
           </div>
 

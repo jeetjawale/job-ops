@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   formatCountryLabel,
   getCompatibleSourcesForCountry,
+  isGlassdoorCountry,
   isSourceAllowedForCountry,
   isUkCountry,
   normalizeCountryKey,
@@ -49,14 +50,24 @@ describe("location-support", () => {
     expect(isSourceAllowedForCountry("ukvisajobs", "worldwide")).toBe(false);
     expect(isSourceAllowedForCountry("indeed", "united states")).toBe(true);
     expect(isSourceAllowedForCountry("linkedin", "worldwide")).toBe(true);
+    expect(isSourceAllowedForCountry("glassdoor", "united states")).toBe(true);
+    expect(isSourceAllowedForCountry("glassdoor", "japan")).toBe(false);
   });
 
   it("filters incompatible sources while preserving compatible order", () => {
     expect(
       getCompatibleSourcesForCountry(
-        ["gradcracker", "indeed", "ukvisajobs", "linkedin"],
+        ["gradcracker", "indeed", "glassdoor", "ukvisajobs", "linkedin"],
         "united states",
       ),
-    ).toEqual(["indeed", "linkedin"]);
+    ).toEqual(["indeed", "glassdoor", "linkedin"]);
+  });
+
+  it("supports glassdoor only in explicitly supported countries", () => {
+    expect(isGlassdoorCountry("united kingdom")).toBe(true);
+    expect(isGlassdoorCountry("uk")).toBe(true);
+    expect(isGlassdoorCountry("usa")).toBe(true);
+    expect(isGlassdoorCountry("japan")).toBe(false);
+    expect(isGlassdoorCountry("worldwide")).toBe(false);
   });
 });

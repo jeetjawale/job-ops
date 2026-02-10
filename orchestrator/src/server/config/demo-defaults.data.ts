@@ -28,7 +28,7 @@ export const DEMO_DEFAULT_SETTINGS: DemoDefaultSettings = {
   jobspyResultsWanted: "25",
   jobspyHoursOld: "72",
   jobspyCountryIndeed: "US",
-  jobspySites: JSON.stringify(["linkedin", "indeed"]),
+  jobspySites: JSON.stringify(["linkedin", "indeed", "glassdoor"]),
   jobspyLinkedinFetchDescription: "1",
   jobspyIsRemote: "0",
   resumeProjects: JSON.stringify({
@@ -253,6 +253,7 @@ export const COMPANY_SUFFIXES = [
 export const DEMO_SOURCE_BASE_URLS: Record<JobSource, string> = {
   linkedin: "https://www.linkedin.com",
   indeed: "https://www.indeed.com",
+  glassdoor: "https://www.glassdoor.com",
   gradcracker: "https://www.gradcracker.com",
   ukvisajobs: "https://www.ukvisajobs.com",
   manual: "https://example.com",

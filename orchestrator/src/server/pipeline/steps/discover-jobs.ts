@@ -67,8 +67,8 @@ export async function discoverJobsStep(args: {
   }
 
   let jobSpySites = compatibleSources.filter(
-    (source): source is "indeed" | "linkedin" =>
-      source === "indeed" || source === "linkedin",
+    (source): source is "indeed" | "linkedin" | "glassdoor" =>
+      source === "indeed" || source === "linkedin" || source === "glassdoor",
   );
 
   const jobspySitesSettingRaw = settings.jobspySites;
@@ -76,7 +76,9 @@ export async function discoverJobsStep(args: {
     try {
       const allowed = JSON.parse(jobspySitesSettingRaw);
       if (Array.isArray(allowed)) {
-        jobSpySites = jobSpySites.filter((site) => allowed.includes(site));
+        jobSpySites = jobSpySites.filter(
+          (site) => site === "glassdoor" || allowed.includes(site),
+        );
       }
     } catch {
       // ignore JSON parse error

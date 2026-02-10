@@ -105,6 +105,7 @@ function toJobSource(site: unknown): JobSource | null {
   if (raw === "gradcracker") return "gradcracker";
   if (raw === "indeed") return "indeed";
   if (raw === "linkedin") return "linkedin";
+  if (raw === "glassdoor") return "glassdoor";
   return null;
 }
 
@@ -164,8 +165,8 @@ export async function runJobSpy(
   const outputDir = join(dataDir, "imports");
   await mkdir(outputDir, { recursive: true });
 
-  const sites = (options.sites ?? ["indeed", "linkedin"])
-    .filter((s) => s === "indeed" || s === "linkedin")
+  const sites = (options.sites ?? ["indeed", "linkedin", "glassdoor"])
+    .filter((s) => s === "indeed" || s === "linkedin" || s === "glassdoor")
     .join(",");
 
   const searchTerms = resolveSearchTerms(options);
@@ -191,7 +192,7 @@ export async function runJobSpy(
           stdio: ["ignore", "pipe", "pipe"],
           env: {
             ...process.env,
-            JOBSPY_SITES: sites || "indeed,linkedin",
+            JOBSPY_SITES: sites || "indeed,linkedin,glassdoor",
             JOBSPY_SEARCH_TERM: searchTerm,
             JOBSPY_TERM_INDEX: String(i + 1),
             JOBSPY_TERM_TOTAL: String(searchTerms.length),

@@ -1,6 +1,10 @@
 import type { AppSettings, JobListItem, JobSource } from "@shared/types";
 import type { FilterTab, JobSort } from "./constants";
-import { orderedFilterSources, orderedSources } from "./constants";
+import {
+  DEFAULT_PIPELINE_SOURCES,
+  orderedFilterSources,
+  orderedSources,
+} from "./constants";
 
 const dateValue = (value: string | null) => {
   if (!value) return null;
@@ -159,7 +163,7 @@ export const getSourcesWithJobs = (jobs: JobListItem[]): JobSource[] => {
 export const getEnabledSources = (
   settings: AppSettings | null,
 ): JobSource[] => {
-  if (!settings) return [...orderedSources];
+  if (!settings) return [...DEFAULT_PIPELINE_SOURCES, "glassdoor"];
 
   const enabled: JobSource[] = [];
   const jobspySites = settings.jobspySites ?? [];
@@ -176,10 +180,16 @@ export const getEnabledSources = (
       if (hasUkVisaJobsAuth) enabled.push(source);
       continue;
     }
-    if (source === "indeed" || source === "linkedin") {
-      if (jobspySites.includes(source)) enabled.push(source);
+    if (
+      source === "indeed" ||
+      source === "linkedin" ||
+      source === "glassdoor"
+    ) {
+      if (source === "glassdoor" || jobspySites.includes(source)) {
+        enabled.push(source);
+      }
     }
   }
 
-  return enabled.length > 0 ? enabled : [...orderedSources];
+  return enabled.length > 0 ? enabled : [...DEFAULT_PIPELINE_SOURCES];
 };
