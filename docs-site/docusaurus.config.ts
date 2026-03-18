@@ -73,7 +73,7 @@ const config: Config = {
         searchResultContextMaxLength: 50,
         explicitSearchResultPath: true,
       },
-    ]
+    ],
   ],
   presets: [
     [
