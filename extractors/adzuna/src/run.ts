@@ -9,7 +9,7 @@ import {
   resolveSearchCities,
   shouldApplyStrictCityFilter,
 } from "@shared/search-cities.js";
-import type { CreateJobInput } from "@shared/types/jobs";
+import type { CreateJobInput, JobLocationEvidence } from "@shared/types/jobs";
 import {
   toNumberOrNull,
   toStringOrNull,
@@ -128,6 +128,14 @@ function mapAdzunaRow(row: AdzunaRawJob): CreateJobInput | null {
   const jobUrl = toStringOrNull(row.jobUrl);
   if (!jobUrl) return null;
 
+  const location = toStringOrNull(row.location);
+  const locationEvidence = location
+    ? ({
+        location,
+        source: "adzuna",
+      } satisfies JobLocationEvidence)
+    : undefined;
+
   return {
     source: "adzuna",
     sourceJobId: toStringOrNull(row.sourceJobId) ?? undefined,
@@ -138,7 +146,8 @@ function mapAdzunaRow(row: AdzunaRawJob): CreateJobInput | null {
       toStringOrNull(row.applicationLink) ??
       toStringOrNull(row.jobUrl) ??
       undefined,
-    location: toStringOrNull(row.location) ?? undefined,
+    location: location ?? undefined,
+    locationEvidence,
     salary: toStringOrNull(row.salary) ?? undefined,
     datePosted: toStringOrNull(row.datePosted) ?? undefined,
     jobDescription: toStringOrNull(row.jobDescription) ?? undefined,

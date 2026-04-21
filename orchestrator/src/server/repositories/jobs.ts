@@ -3,17 +3,23 @@
  */
 
 import { randomUUID } from "node:crypto";
+import { buildLocationEvidence } from "@shared/location-domain.js";
 import type {
   CreateJobInput,
   CreateJobNoteInput,
   Job,
   JobListItem,
+  JobLocationEvidence,
   JobNote,
   JobStatus,
   JobsRevisionResponse,
   UpdateJobInput,
   UpdateJobNoteInput,
 } from "@shared/types";
+import type {
+  LocationEvidence,
+  LocationEvidenceEntry,
+} from "@shared/types/location";
 import { and, desc, eq, inArray, isNull, lt, ne, sql } from "drizzle-orm";
 import { db, schema } from "../db/index";
 
@@ -31,6 +37,33 @@ type AppliedDuplicateMatchCandidate = {
 function normalizeStatusFilter(statuses?: JobStatus[]): string | null {
   if (!statuses || statuses.length === 0) return null;
   return Array.from(new Set(statuses)).sort().join(",");
+}
+
+function parseLocationEvidence(
+  raw: string | null | undefined,
+): JobLocationEvidence | null {
+  if (!raw) return null;
+
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (!parsed || typeof parsed !== "object") {
+      return null;
+    }
+    return buildLocationEvidence(
+      Array.isArray(parsed)
+        ? (parsed as readonly LocationEvidenceEntry[])
+        : (parsed as LocationEvidence),
+    );
+  } catch {
+    return null;
+  }
+}
+
+function serializeLocationEvidence(
+  evidence: JobLocationEvidence | null | undefined,
+): string | null {
+  if (!evidence) return null;
+  return JSON.stringify(buildLocationEvidence(evidence));
 }
 
 /**
@@ -307,6 +340,7 @@ async function insertJob(input: CreateJobInput): Promise<Job> {
     deadline: input.deadline ?? null,
     salary: input.salary ?? null,
     location: input.location ?? null,
+    locationEvidence: serializeLocationEvidence(input.locationEvidence),
     degreeRequired: input.degreeRequired ?? null,
     starting: input.starting ?? null,
     jobDescription: input.jobDescription ?? null,
@@ -444,6 +478,7 @@ export async function updateJob(
   input: UpdateJobInput,
 ): Promise<Job | null> {
   const now = new Date().toISOString();
+  const { locationEvidence, ...updateFields } = input;
   const readyAtUpdate =
     input.readyAt !== undefined
       ? { readyAt: input.readyAt }
@@ -460,7 +495,10 @@ export async function updateJob(
   await db
     .update(jobs)
     .set({
-      ...input,
+      ...updateFields,
+      ...(locationEvidence !== undefined
+        ? { locationEvidence: serializeLocationEvidence(locationEvidence) }
+        : {}),
       updatedAt: now,
       ...(input.status === "processing" ? { processedAt: now } : {}),
       ...readyAtUpdate,
@@ -578,6 +616,7 @@ function mapRowToJob(row: typeof jobs.$inferSelect): Job {
     deadline: row.deadline,
     salary: row.salary,
     location: row.location,
+    locationEvidence: parseLocationEvidence(row.locationEvidence),
     degreeRequired: row.degreeRequired,
     starting: row.starting,
     jobDescription: row.jobDescription,

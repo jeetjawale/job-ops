@@ -1,4 +1,9 @@
 import type { ExtractorSourceId } from "../extractors";
+import type { LocationEvidence, LocationMatchResult } from "./location";
+
+export type { LocationEvidenceQuality } from "./location";
+
+export type JobLocationEvidence = LocationEvidence;
 
 export type JobStatus =
   | "discovered" // Crawled but not processed
@@ -157,6 +162,8 @@ export interface Job {
   deadline: string | null;
   salary: string | null;
   location: string | null;
+  locationEvidence: JobLocationEvidence | null;
+  locationMatch?: LocationMatchResult | null;
   degreeRequired: string | null;
   starting: string | null;
   jobDescription: string | null;
@@ -252,6 +259,7 @@ export interface CreateJobInput {
   deadline?: string;
   salary?: string;
   location?: string;
+  locationEvidence?: JobLocationEvidence;
   degreeRequired?: string;
   starting?: string;
   jobDescription?: string;
@@ -325,6 +333,7 @@ export interface UpdateJobInput {
   outcome?: JobOutcome | null;
   closedAt?: number | null;
   jobDescription?: string | null;
+  locationEvidence?: JobLocationEvidence | null;
   suitabilityScore?: number;
   suitabilityReason?: string;
   tailoredSummary?: string;

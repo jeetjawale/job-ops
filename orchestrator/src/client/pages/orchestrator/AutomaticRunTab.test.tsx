@@ -1,4 +1,5 @@
 import { createAppSettings } from "@shared/testing/factories.js";
+import type { JobSource } from "@shared/types";
 import {
   fireEvent,
   render,
@@ -7,6 +8,7 @@ import {
   within,
 } from "@testing-library/react";
 import type React from "react";
+import { useState } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { AutomaticRunTab } from "./AutomaticRunTab";
 import { AUTOMATIC_PRESETS, RUN_MEMORY_STORAGE_KEY } from "./automatic-run";
@@ -78,13 +80,31 @@ function ensureStorage(): Storage {
 }
 
 describe("AutomaticRunTab", () => {
+  const openLocationPreferences = () => {
+    const trigger = screen.getByRole("button", {
+      name: "Review and edit location intent",
+    });
+    if (trigger.getAttribute("aria-expanded") !== "true") {
+      fireEvent.click(trigger);
+    }
+  };
+
+  const openSourcePicker = () => {
+    const trigger = screen.getByRole("button", {
+      name: "Review and edit sources",
+    });
+    if (trigger.getAttribute("aria-expanded") !== "true") {
+      fireEvent.click(trigger);
+    }
+  };
+
   beforeEach(() => {
     getDetectedCountryKeyMock.mockReset();
     getDetectedCountryKeyMock.mockReturnValue(null);
     ensureStorage().clear();
   });
 
-  it("uses detected country when location settings are still defaults", () => {
+  it("shows detected country as a suggestion when location settings are still defaults", () => {
     getDetectedCountryKeyMock.mockReturnValueOnce("united states");
 
     render(
@@ -101,8 +121,38 @@ describe("AutomaticRunTab", () => {
     );
 
     expect(
+      screen.getByRole("button", { name: "Select country" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Use suggestion" }),
+    ).toBeInTheDocument();
+    expect(screen.getByText(/Detected from your browser/i)).toBeInTheDocument();
+  });
+
+  it("applies the browser country suggestion when requested", () => {
+    getDetectedCountryKeyMock.mockReturnValueOnce("united states");
+
+    render(
+      <AutomaticRunTab
+        open
+        settings={createAppSettings()}
+        enabledSources={["linkedin", "gradcracker", "ukvisajobs"]}
+        pipelineSources={["linkedin"]}
+        onToggleSource={vi.fn()}
+        onSetPipelineSources={vi.fn()}
+        isPipelineRunning={false}
+        onSaveAndRun={vi.fn().mockResolvedValue(undefined)}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Use suggestion" }));
+
+    expect(
       screen.getByRole("button", { name: "United States" }),
     ).toBeInTheDocument();
+    expect(
+      screen.queryByText(/Detected from your browser/i),
+    ).not.toBeInTheDocument();
   });
 
   it("does not default the country picker to United Kingdom", () => {
@@ -221,8 +271,70 @@ describe("AutomaticRunTab", () => {
       expect(onSetPipelineSources).toHaveBeenCalledWith(["linkedin"]);
     });
 
+    openSourcePicker();
+
     expect(screen.getByRole("button", { name: "Gradcracker" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "UK Visa Jobs" })).toBeDisabled();
+  });
+
+  it("moves a deselected source to the end of the ready list", async () => {
+    const StatefulTab = () => {
+      const [pipelineSources, setPipelineSources] = useState<JobSource[]>([
+        "linkedin",
+        "indeed",
+      ]);
+
+      return (
+        <AutomaticRunTab
+          open
+          settings={createAppSettings({
+            jobspyCountryIndeed: {
+              value: "united kingdom",
+              default: "united kingdom",
+              override: "united kingdom",
+            },
+            searchCities: {
+              value: "London",
+              default: "",
+              override: "London",
+            },
+          })}
+          enabledSources={["linkedin", "indeed", "glassdoor"]}
+          pipelineSources={pipelineSources}
+          onToggleSource={(source, checked) => {
+            setPipelineSources((current) =>
+              checked
+                ? [...current.filter((value) => value !== source), source]
+                : current.filter((value) => value !== source),
+            );
+          }}
+          onSetPipelineSources={vi.fn()}
+          isPipelineRunning={false}
+          onSaveAndRun={vi.fn().mockResolvedValue(undefined)}
+        />
+      );
+    };
+
+    render(<StatefulTab />);
+
+    openSourcePicker();
+    fireEvent.click(screen.getByRole("button", { name: "LinkedIn" }));
+
+    await waitFor(() => {
+      expect(
+        screen.getAllByRole("button", {
+          name: /^(Indeed|Glassdoor|LinkedIn)$/,
+        }),
+      ).toHaveLength(3);
+    });
+
+    expect(
+      screen
+        .getAllByRole("button", {
+          name: /^(Indeed|Glassdoor|LinkedIn)$/,
+        })
+        .map((button) => button.getAttribute("aria-label")),
+    ).toEqual(["Indeed", "Glassdoor", "LinkedIn"]);
   });
 
   it("shows disabled source guidance copy for UK-only source", async () => {
@@ -250,6 +362,8 @@ describe("AutomaticRunTab", () => {
         onSaveAndRun={vi.fn().mockResolvedValue(undefined)}
       />,
     );
+
+    openSourcePicker();
 
     expect(
       screen.getByTitle(
@@ -289,6 +403,8 @@ describe("AutomaticRunTab", () => {
     await waitFor(() => {
       expect(onSetPipelineSources).toHaveBeenCalledWith(["linkedin"]);
     });
+
+    openSourcePicker();
 
     const glassdoorButton = screen.getByRole("button", { name: "Glassdoor" });
     expect(glassdoorButton).toBeDisabled();
@@ -332,6 +448,8 @@ describe("AutomaticRunTab", () => {
     await waitFor(() => {
       expect(onSetPipelineSources).toHaveBeenCalledWith(["linkedin"]);
     });
+
+    openSourcePicker();
 
     const glassdoorButton = screen.getByRole("button", { name: "Glassdoor" });
     expect(glassdoorButton).toBeDisabled();
@@ -450,6 +568,7 @@ describe("AutomaticRunTab", () => {
     ).not.toBeInTheDocument();
 
     fireEvent.focus(screen.getByLabelText("Cities"));
+    openSourcePicker();
 
     expect(
       screen.getByRole("button", { name: "Remove city London" }),
@@ -480,6 +599,7 @@ describe("AutomaticRunTab", () => {
       />,
     );
 
+    openLocationPreferences();
     expect(screen.getByLabelText("Remote")).toBeChecked();
     expect(screen.getByLabelText("Onsite")).toBeChecked();
     expect(screen.getByLabelText("Hybrid")).not.toBeChecked();
@@ -535,6 +655,7 @@ describe("AutomaticRunTab", () => {
       />,
     );
 
+    openLocationPreferences();
     fireEvent.click(screen.getByLabelText("Remote"));
     fireEvent.click(screen.getByLabelText("Hybrid"));
     fireEvent.click(screen.getByLabelText("Onsite"));
@@ -596,6 +717,7 @@ describe("AutomaticRunTab", () => {
       />,
     );
 
+    openLocationPreferences();
     fireEvent.click(screen.getByLabelText("Hybrid"));
     fireEvent.click(screen.getByLabelText("Onsite"));
     fireEvent.click(screen.getByRole("button", { name: "Start run now" }));
@@ -853,6 +975,7 @@ describe("AutomaticRunTab", () => {
       />,
     );
 
+    openLocationPreferences();
     expect(screen.getByText("Work arrangement")).toBeInTheDocument();
     expect(screen.getByText("Location scope")).toBeInTheDocument();
     expect(screen.getByText("Match strictness")).toBeInTheDocument();

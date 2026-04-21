@@ -4,6 +4,7 @@ import type {
   LocationSearchScope,
 } from "../location-preferences";
 import type { Job, JobStatus } from "./jobs";
+import type { LocationIntent } from "./location";
 import type { PdfRenderer } from "./settings";
 
 export interface PipelineConfig {
@@ -11,10 +12,18 @@ export interface PipelineConfig {
   minSuitabilityScore: number; // Minimum score to auto-process
   sources: ExtractorSourceId[]; // Job sources to crawl
   outputDir: string; // Directory for generated PDFs
+  locationIntent?: LocationIntent;
   enableCrawling?: boolean;
   enableScoring?: boolean;
   enableImporting?: boolean;
   enableAutoTailoring?: boolean;
+}
+
+export interface PipelineRunConfigSnapshot {
+  topN: number;
+  minSuitabilityScore: number;
+  sources: ExtractorSourceId[];
+  locationIntent: LocationIntent;
 }
 
 export interface PipelineRun {
@@ -25,6 +34,7 @@ export interface PipelineRun {
   jobsDiscovered: number;
   jobsProcessed: number;
   errorMessage: string | null;
+  configSnapshot?: PipelineRunConfigSnapshot | null;
 }
 
 export type PipelineRunExecutionStage =

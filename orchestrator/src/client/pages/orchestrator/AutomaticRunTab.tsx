@@ -1,16 +1,21 @@
 import { EXTRACTOR_SOURCE_METADATA } from "@shared/extractors";
+import {
+  createLocationIntent,
+  type LocationSourcePlan,
+  planLocationSources,
+} from "@shared/location-intelligence.js";
 import type {
   LocationMatchStrictness,
   LocationSearchScope,
 } from "@shared/location-preferences.js";
 import {
   formatCountryLabel,
-  isSourceAllowedForCountry,
   normalizeCountryKey,
   SUPPORTED_COUNTRY_KEYS,
 } from "@shared/location-support.js";
 import type { AppSettings, JobSource } from "@shared/types";
-import { Loader2, Sparkles } from "lucide-react";
+import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
+import { Info, Loader2, Sparkles } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useForm } from "react-hook-form";
 import {
@@ -19,6 +24,8 @@ import {
   AccordionItem,
   AccordionTrigger,
 } from "@/components/ui/accordion";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -27,12 +34,6 @@ import { Label } from "@/components/ui/label";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { SearchableDropdown } from "@/components/ui/searchable-dropdown";
 import { Separator } from "@/components/ui/separator";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger,
-} from "@/components/ui/tooltip";
 import { getDetectedCountryKey } from "@/lib/user-location";
 import { sourceLabel } from "@/lib/utils";
 import {
@@ -99,26 +100,12 @@ const GLASSDOOR_LOCATION_REASON =
 const HIDDEN_COUNTRY_KEYS = new Set(["usa/ca"]);
 const MIN_RUN_BUDGET = 50;
 const MAX_RUN_BUDGET = 1000;
+const SOURCE_MOTION_EASE = [0.22, 1, 0.36, 1] as const;
 
 function normalizeUiCountryKey(value: string): string {
   const normalized = normalizeCountryKey(value);
   if (normalized === "usa/ca") return "united states";
   return normalized;
-}
-
-function getSourceDisabledReason(
-  source: JobSource,
-  countryAllowed: boolean,
-): string {
-  if (source === "glassdoor") {
-    return countryAllowed
-      ? GLASSDOOR_LOCATION_REASON
-      : GLASSDOOR_COUNTRY_REASON;
-  }
-  if (EXTRACTOR_SOURCE_METADATA[source]?.ukOnly) {
-    return `${sourceLabel[source]} is available only when country is United Kingdom.`;
-  }
-  return `${sourceLabel[source]} is not available for the selected country.`;
 }
 
 function toNumber(input: string, min: number, max: number, fallback: number) {
@@ -136,6 +123,116 @@ function formatWorkplaceTypeLabel(workplaceType: WorkplaceType): string {
   return workplaceType.charAt(0).toUpperCase() + workplaceType.slice(1);
 }
 
+function getKnownJobSource(
+  source: LocationSourcePlan["source"],
+): JobSource | null {
+  return source in EXTRACTOR_SOURCE_METADATA ? (source as JobSource) : null;
+}
+
+function getSourceStatus(args: {
+  countrySelected: boolean;
+  plan: LocationSourcePlan;
+}): {
+  badgeLabel: string;
+  detail: string;
+  available: boolean;
+} {
+  const { countrySelected, plan } = args;
+  const { source, requestedCountry, requestedCities } = plan;
+  const knownSource = getKnownJobSource(source);
+  const countryLabel = requestedCountry
+    ? formatCountryLabel(requestedCountry)
+    : "";
+  const sourceName = knownSource ? sourceLabel[knownSource] : source;
+  const isUkOnlySource = knownSource
+    ? Boolean(EXTRACTOR_SOURCE_METADATA[knownSource]?.ukOnly)
+    : false;
+
+  if (!countrySelected) {
+    if (source === "glassdoor" || isUkOnlySource) {
+      return {
+        badgeLabel: "Select country",
+        detail:
+          "Pick a country first to check whether this source is available.",
+        available: false,
+      };
+    }
+
+    return {
+      badgeLabel: "Available",
+      detail: "This source is available without a country selection.",
+      available: true,
+    };
+  }
+
+  if (source === "glassdoor") {
+    if (
+      plan.capabilities.supportedCountryKeys !== null &&
+      requestedCountry !== null &&
+      !plan.capabilities.supportedCountryKeys.includes(requestedCountry)
+    ) {
+      return {
+        badgeLabel: "Blocked",
+        detail: GLASSDOOR_COUNTRY_REASON,
+        available: false,
+      };
+    }
+
+    if (
+      plan.capabilities.requiresCityLocations &&
+      requestedCities.length === 0
+    ) {
+      return {
+        badgeLabel: "Needs city",
+        detail: GLASSDOOR_LOCATION_REASON,
+        available: false,
+      };
+    }
+
+    return {
+      badgeLabel: "Available",
+      detail: "Glassdoor is available for this location intent.",
+      available: true,
+    };
+  }
+
+  if (isUkOnlySource && !plan.canRun) {
+    return {
+      badgeLabel: "UK only",
+      detail: `${sourceName} is available only when country is United Kingdom.`,
+      available: false,
+    };
+  }
+
+  if (!plan.canRun) {
+    return {
+      badgeLabel: "Blocked",
+      detail: `${sourceName} is not available for ${countryLabel || "the selected country"}.`,
+      available: false,
+    };
+  }
+
+  return {
+    badgeLabel: "Available",
+    detail: "Available for this location intent.",
+    available: true,
+  };
+}
+
+interface SourcePickerRow {
+  source: JobSource;
+  selected: boolean;
+  status: ReturnType<typeof getSourceStatus>;
+}
+
+function getRadioOptionClassName(selected: boolean): string {
+  return `flex cursor-pointer items-center gap-3 rounded-lg border px-3 py-3 text-sm transition-colors ${
+    selected
+      ? "border-border/70 bg-muted/20 text-foreground"
+      : "border-border/60 text-foreground hover:bg-muted/20"
+  }`;
+}
+
 export const AutomaticRunTab: React.FC<AutomaticRunTabProps> = ({
   open,
   settings,
@@ -148,6 +245,12 @@ export const AutomaticRunTab: React.FC<AutomaticRunTabProps> = ({
 }) => {
   const [isSaving, setIsSaving] = useState(false);
   const [advancedOpen, setAdvancedOpen] = useState(false);
+  const prefersReducedMotion = useReducedMotion();
+  const [sourceDisplayOrder, setSourceDisplayOrder] =
+    useState<JobSource[]>(enabledSources);
+  const [browserCountrySuggestion, setBrowserCountrySuggestion] = useState<
+    string | null
+  >(null);
   const [selectedPreset, setSelectedPreset] =
     useState<AutomaticPresetSelection>("custom");
   const { watch, reset, setValue } = useForm<AutomaticRunFormValues>({
@@ -208,26 +311,22 @@ export const AutomaticRunTab: React.FC<AutomaticRunTabProps> = ({
       settings?.jobspyCountryIndeed?.override ||
         settings?.searchCities?.override,
     );
-    const defaultLocationCountry = !hasExplicitLocationOverride
+    const rememberedCountry = normalizeUiCountryKey(
+      settings?.jobspyCountryIndeed?.value ??
+        settings?.searchCities?.value ??
+        DEFAULT_VALUES.country,
+    );
+    const detectedCountry = !hasExplicitLocationOverride
       ? getDetectedCountryKey()
       : null;
-    const rememberedCountry = normalizeUiCountryKey(
-      hasExplicitLocationOverride
-        ? (settings?.jobspyCountryIndeed?.value ??
-            settings?.searchCities?.value ??
-            DEFAULT_VALUES.country)
-        : (defaultLocationCountry ??
-            settings?.jobspyCountryIndeed?.value ??
-            settings?.searchCities?.value ??
-            DEFAULT_VALUES.country),
-    );
-    const rememberedCountryKey = rememberedCountry || DEFAULT_VALUES.country;
+    const countryValue = rememberedCountry || DEFAULT_VALUES.country;
+    const suggestion =
+      !countryValue && detectedCountry ? detectedCountry : null;
     const rememberedLocations = parseCityLocationsSetting(
       settings?.searchCities?.value,
     ).filter(
       (location) =>
-        normalizeCountryKey(location) !==
-        normalizeCountryKey(rememberedCountryKey),
+        normalizeCountryKey(location) !== normalizeCountryKey(countryValue),
     );
     const rememberedWorkplaceTypes = normalizeWorkplaceTypes(
       settings?.workplaceTypes?.value,
@@ -238,11 +337,12 @@ export const AutomaticRunTab: React.FC<AutomaticRunTabProps> = ({
       settings?.locationMatchStrictness?.value ??
       DEFAULT_VALUES.matchStrictness;
 
+    setBrowserCountrySuggestion(suggestion);
     reset({
       topN: String(rememberedTopN),
       minSuitabilityScore: String(rememberedMinSuitabilityScore),
       runBudget: String(rememberedRunBudget),
-      country: rememberedCountry || DEFAULT_VALUES.country,
+      country: countryValue,
       cityLocations: rememberedLocations,
       cityLocationDraft: "",
       workplaceTypes: rememberedWorkplaceTypes,
@@ -254,6 +354,23 @@ export const AutomaticRunTab: React.FC<AutomaticRunTabProps> = ({
     setSelectedPreset(memory?.presetId ?? "custom");
     setAdvancedOpen(false);
   }, [open, settings, reset]);
+
+  useEffect(() => {
+    setSourceDisplayOrder((current) => {
+      const filtered = current.filter((source) =>
+        enabledSources.includes(source),
+      );
+      const additions = enabledSources.filter(
+        (source) => !filtered.includes(source),
+      );
+      const next = [...filtered, ...additions];
+
+      return next.length === current.length &&
+        next.every((source, index) => source === current[index])
+        ? current
+        : next;
+    });
+  }, [enabledSources]);
 
   const values = useMemo<AutomaticRunValues>(() => {
     const normalizedCountry = normalizeUiCountryKey(countryInput);
@@ -292,27 +409,113 @@ export const AutomaticRunTab: React.FC<AutomaticRunTabProps> = ({
 
   const workplaceTypeSelectionInvalid = workplaceTypes.length === 0;
 
+  const locationIntent = useMemo(
+    () =>
+      createLocationIntent({
+        selectedCountry: values.country,
+        cityLocations: values.cityLocations,
+        workplaceTypes: values.workplaceTypes,
+        searchScope: values.searchScope,
+        matchStrictness: values.matchStrictness,
+      }),
+    [
+      values.cityLocations,
+      values.country,
+      values.matchStrictness,
+      values.searchScope,
+      values.workplaceTypes,
+    ],
+  );
+
+  const sourcePlans = useMemo(
+    () =>
+      planLocationSources({ intent: locationIntent, sources: enabledSources }),
+    [enabledSources, locationIntent],
+  );
+
+  const sourcePlanBySource = useMemo(
+    () =>
+      new Map(
+        sourcePlans.plans.map((plan) => [plan.source as JobSource, plan]),
+      ),
+    [sourcePlans.plans],
+  );
+
   const isSourceAvailableForRun = useCallback(
-    (source: JobSource) => {
-      if (!isSourceAllowedForCountry(source, values.country)) return false;
-      if (source === "glassdoor" && values.cityLocations.length === 0)
-        return false;
-      return true;
-    },
-    [values.country, values.cityLocations.length],
+    (source: JobSource) => sourcePlanBySource.get(source)?.canRun ?? false,
+    [sourcePlanBySource],
   );
 
   const compatibleEnabledSources = useMemo(
-    () => enabledSources.filter((source) => isSourceAvailableForRun(source)),
-    [enabledSources, isSourceAvailableForRun],
+    () =>
+      sourcePlans.compatibleSources.filter((source): source is JobSource =>
+        enabledSources.includes(source as JobSource),
+      ),
+    [enabledSources, sourcePlans.compatibleSources],
   );
 
   const compatiblePipelineSources = useMemo(
     () => pipelineSources.filter((source) => isSourceAvailableForRun(source)),
     [pipelineSources, isSourceAvailableForRun],
   );
-
   const countrySelectionInvalid = values.country.length === 0;
+  const sourceRows = useMemo<SourcePickerRow[]>(
+    () =>
+      sourceDisplayOrder.flatMap((source) => {
+        const plan = sourcePlanBySource.get(source);
+        if (!plan) return [];
+
+        return [
+          {
+            source,
+            selected: pipelineSources.includes(source),
+            status: getSourceStatus({
+              countrySelected: !countrySelectionInvalid,
+              plan,
+            }),
+          },
+        ];
+      }),
+    [
+      countrySelectionInvalid,
+      pipelineSources,
+      sourceDisplayOrder,
+      sourcePlanBySource,
+    ],
+  );
+  const selectedSourceRows = useMemo(
+    () => sourceRows.filter((row) => row.selected && row.status.available),
+    [sourceRows],
+  );
+  const readySourceRows = useMemo(
+    () => sourceRows.filter((row) => !row.selected && row.status.available),
+    [sourceRows],
+  );
+  const unavailableSourceRows = useMemo(
+    () => sourceRows.filter((row) => !row.status.available),
+    [sourceRows],
+  );
+  const sourceMotionTransition = useMemo(
+    () =>
+      prefersReducedMotion
+        ? { duration: 0 }
+        : { duration: 0.22, ease: SOURCE_MOTION_EASE },
+    [prefersReducedMotion],
+  );
+  const sourceSectionInitial = prefersReducedMotion
+    ? false
+    : { opacity: 0, y: -8 };
+  const sourceSectionAnimate = { opacity: 1, y: 0 };
+  const sourceRowInitial = prefersReducedMotion
+    ? { opacity: 1 }
+    : { opacity: 0, y: 8, scale: 0.985 };
+  const sourceRowExit = prefersReducedMotion
+    ? { opacity: 0 }
+    : { opacity: 0, y: -6, scale: 0.985 };
+  const countrySuggestion =
+    browserCountrySuggestion && browserCountrySuggestion !== values.country
+      ? browserCountrySuggestion
+      : null;
 
   useEffect(() => {
     const filtered = pipelineSources.filter((source) =>
@@ -365,6 +568,17 @@ export const AutomaticRunTab: React.FC<AutomaticRunTabProps> = ({
 
     setValue("workplaceTypes", next, { shouldDirty: true });
   };
+
+  const handleSourceToggle = useCallback(
+    (source: JobSource, checked: boolean) => {
+      setSourceDisplayOrder((current) => [
+        ...current.filter((value) => value !== source),
+        source,
+      ]);
+      onToggleSource(source, checked);
+    },
+    [onToggleSource],
+  );
 
   const applyPreset = (presetId: AutomaticPresetId) => {
     const preset = AUTOMATIC_PRESETS[presetId];
@@ -455,180 +669,234 @@ export const AutomaticRunTab: React.FC<AutomaticRunTabProps> = ({
               </div>
             </div>
             <Separator />
-            <section className="space-y-6">
-              <div className="space-y-3">
-                <div className="grid gap-4 md:grid-cols-[minmax(0,0.85fr)_minmax(0,1.15fr)]">
-                  <div className="space-y-2">
-                    <Label className="text-base font-semibold">Country</Label>
-                    <SearchableDropdown
-                      value={values.country}
-                      options={countryOptions}
-                      onValueChange={(country) =>
-                        setValue("country", country, {
-                          shouldDirty: true,
-                        })
-                      }
-                      placeholder="Select country"
-                      searchPlaceholder="Search country..."
-                      emptyText="No matching countries."
-                      triggerClassName="h-10 w-full"
-                      ariaLabel={
-                        values.country
-                          ? formatCountryLabel(values.country)
-                          : "Select country"
-                      }
-                    />
-                    {countrySelectionInvalid ? (
+            <Accordion
+              type="single"
+              collapsible
+              defaultValue="location-intent"
+              className="w-full"
+            >
+              <AccordionItem value="location-intent" className="border-b-0">
+                <AccordionTrigger
+                  aria-label="Review and edit location intent"
+                  className="gap-4 py-2 hover:no-underline"
+                >
+                  <div className="flex w-full flex-col gap-3 text-left sm:flex-row sm:items-center sm:justify-between">
+                    <div className="min-w-0 space-y-1">
+                      <p className="py-0 text-base font-semibold hover:no-underline">
+                        Location preferences
+                      </p>
+                      <p className="truncate text-sm text-muted-foreground whitespace-pre-wrap">
+                        {locationSummary}
+                      </p>
+                    </div>
+                    <div className="flex shrink-0 flex-wrap gap-2">
+                      {countrySuggestion ? (
+                        <Badge
+                          variant="outline"
+                          className="rounded-full border-sky-500/30 bg-sky-500/10 text-sky-700 dark:text-sky-200"
+                        >
+                          Browser suggestion
+                        </Badge>
+                      ) : null}
+                    </div>
+                  </div>
+                </AccordionTrigger>
+                <AccordionContent className="space-y-4 pt-4">
+                  {countrySuggestion ? (
+                    <Alert className="border-sky-500/20 bg-sky-500/5">
+                      <Info className="h-4 w-4" />
+                      <AlertTitle>Detected from your browser</AlertTitle>
+                      <AlertDescription>
+                        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                          <p className="text-sm leading-6 text-muted-foreground">
+                            We detected{" "}
+                            <span className="font-medium text-foreground">
+                              {formatCountryLabel(countrySuggestion)}
+                            </span>{" "}
+                            as a helpful starting point. Apply it to unlock
+                            country-specific sources, or choose another country.
+                          </p>
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            className="shrink-0"
+                            onClick={() =>
+                              setValue("country", countrySuggestion, {
+                                shouldDirty: true,
+                              })
+                            }
+                          >
+                            Use suggestion
+                          </Button>
+                        </div>
+                      </AlertDescription>
+                    </Alert>
+                  ) : null}
+
+                  <div className="grid gap-4 md:grid-cols-[minmax(0,0.85fr)_minmax(0,1.15fr)]">
+                    <div className="space-y-2">
+                      <Label className="text-base font-semibold">Country</Label>
+                      <SearchableDropdown
+                        value={values.country}
+                        options={countryOptions}
+                        onValueChange={(country) =>
+                          setValue("country", country, {
+                            shouldDirty: true,
+                          })
+                        }
+                        placeholder="Select country"
+                        searchPlaceholder="Search country..."
+                        emptyText="No matching countries."
+                        triggerClassName="h-10 w-full"
+                        ariaLabel={
+                          values.country
+                            ? formatCountryLabel(values.country)
+                            : "Select country"
+                        }
+                      />
+                      {countrySelectionInvalid ? (
+                        <p className="text-xs text-destructive">
+                          {countrySuggestion
+                            ? "Select a country or use the browser suggestion."
+                            : "Select a country."}
+                        </p>
+                      ) : null}
+                    </div>
+
+                    <div className="space-y-2">
+                      <Label
+                        htmlFor="city-locations-input"
+                        className="text-base font-semibold"
+                      >
+                        Cities
+                      </Label>
+                      <TokenizedInput
+                        id="city-locations-input"
+                        values={cityLocations}
+                        draft={cityLocationDraft}
+                        parseInput={parseCityLocationsInput}
+                        onDraftChange={(value) =>
+                          setValue("cityLocationDraft", value)
+                        }
+                        onValuesChange={(value) =>
+                          setValue("cityLocations", value, {
+                            shouldDirty: true,
+                          })
+                        }
+                        placeholder='e.g. "London"'
+                        removeLabelPrefix="Remove city"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="space-y-3">
+                    <p className="text-xs font-semibold uppercase tracking-[0.18em] text-muted-foreground">
+                      Work arrangement
+                    </p>
+                    <div className="flex flex-wrap gap-2 gap-x-4">
+                      {WORKPLACE_TYPE_OPTIONS.map((workplaceType) => {
+                        const checkboxId = `workplace-type-${workplaceType}`;
+                        const checked = workplaceTypes.includes(workplaceType);
+
+                        return (
+                          <label
+                            key={workplaceType}
+                            htmlFor={checkboxId}
+                            className="flex cursor-pointer items-center gap-3 text-sm transition-colors"
+                          >
+                            <Checkbox
+                              id={checkboxId}
+                              checked={checked}
+                              onCheckedChange={(nextChecked) => {
+                                toggleWorkplaceType(
+                                  workplaceType,
+                                  nextChecked === true,
+                                );
+                              }}
+                            />
+                            {formatWorkplaceTypeLabel(workplaceType)}
+                          </label>
+                        );
+                      })}
+                    </div>
+                    {workplaceTypeSelectionInvalid ? (
                       <p className="text-xs text-destructive">
-                        Select a country.
+                        Select at least one workplace type.
                       </p>
                     ) : null}
                   </div>
 
-                  <div className="space-y-2">
-                    <Label
-                      htmlFor="city-locations-input"
-                      className="text-base font-semibold"
-                    >
-                      Cities
-                    </Label>
-                    <TokenizedInput
-                      id="city-locations-input"
-                      values={cityLocations}
-                      draft={cityLocationDraft}
-                      parseInput={parseCityLocationsInput}
-                      onDraftChange={(value) =>
-                        setValue("cityLocationDraft", value)
-                      }
-                      onValuesChange={(value) =>
-                        setValue("cityLocations", value, {
+                  <div className="space-y-3">
+                    <p className="text-xs font-semibold uppercase tracking-[0.18em] text-muted-foreground">
+                      Location scope
+                    </p>
+                    <RadioGroup
+                      value={searchScope}
+                      onValueChange={(value) =>
+                        setValue("searchScope", value as LocationSearchScope, {
                           shouldDirty: true,
                         })
                       }
-                      placeholder='e.g. "London"'
-                      removeLabelPrefix="Remove city"
-                    />
+                      className="gap-2"
+                    >
+                      {SEARCH_SCOPE_OPTIONS.map((option) => {
+                        const id = `search-scope-${option.value}`;
+                        const selected = searchScope === option.value;
+                        return (
+                          <label
+                            key={option.value}
+                            htmlFor={id}
+                            className={getRadioOptionClassName(selected)}
+                          >
+                            <RadioGroupItem value={option.value} id={id} />
+                            <span className="text-sm font-medium">
+                              {option.label}
+                            </span>
+                          </label>
+                        );
+                      })}
+                    </RadioGroup>
                   </div>
-                </div>
-              </div>
 
-              <div className="space-y-3">
-                <p className="text-xs font-semibold uppercase tracking-[0.18em] text-muted-foreground">
-                  Work arrangement
-                </p>
-                <div className="flex flex-wrap gap-2 gap-x-4">
-                  {WORKPLACE_TYPE_OPTIONS.map((workplaceType) => {
-                    const checkboxId = `workplace-type-${workplaceType}`;
-                    const checked = workplaceTypes.includes(workplaceType);
-
-                    return (
-                      <label
-                        key={workplaceType}
-                        htmlFor={checkboxId}
-                        className={`flex cursor-pointer items-center gap-3 text-sm transition-colors`}
-                      >
-                        <Checkbox
-                          id={checkboxId}
-                          checked={checked}
-                          onCheckedChange={(nextChecked) => {
-                            toggleWorkplaceType(
-                              workplaceType,
-                              nextChecked === true,
-                            );
-                          }}
-                        />
-                        {formatWorkplaceTypeLabel(workplaceType)}
-                      </label>
-                    );
-                  })}
-                </div>
-                {workplaceTypeSelectionInvalid ? (
-                  <p className="text-xs text-destructive">
-                    Select at least one workplace type.
-                  </p>
-                ) : null}
-              </div>
-
-              <div className="space-y-3">
-                <p className="text-xs font-semibold uppercase tracking-[0.18em] text-muted-foreground">
-                  Location scope
-                </p>
-                <RadioGroup
-                  value={searchScope}
-                  onValueChange={(value) =>
-                    setValue("searchScope", value as LocationSearchScope, {
-                      shouldDirty: true,
-                    })
-                  }
-                  className="gap-2"
-                >
-                  {SEARCH_SCOPE_OPTIONS.map((option) => {
-                    const id = `search-scope-${option.value}`;
-                    const selected = searchScope === option.value;
-                    return (
-                      <label
-                        key={option.value}
-                        htmlFor={id}
-                        className={`flex cursor-pointer items-center gap-3 rounded-xl px-3 py-3 transition-colors ${
-                          selected
-                            ? "bg-muted text-foreground"
-                            : "text-foreground/80 hover:bg-muted/60"
-                        }`}
-                      >
-                        <RadioGroupItem value={option.value} id={id} />
-                        <span className="text-sm font-medium">
-                          {option.label}
-                        </span>
-                      </label>
-                    );
-                  })}
-                </RadioGroup>
-              </div>
-
-              <div className="space-y-3">
-                <p className="text-xs font-semibold uppercase tracking-[0.18em] text-muted-foreground">
-                  Match strictness
-                </p>
-                <RadioGroup
-                  value={matchStrictness}
-                  onValueChange={(value) =>
-                    setValue(
-                      "matchStrictness",
-                      value as LocationMatchStrictness,
-                      {
-                        shouldDirty: true,
-                      },
-                    )
-                  }
-                  className="flex flex-col gap-2 sm:flex-row"
-                >
-                  {MATCH_STRICTNESS_OPTIONS.map((option) => {
-                    const id = `match-strictness-${option.value}`;
-                    const selected = matchStrictness === option.value;
-                    return (
-                      <label
-                        key={option.value}
-                        htmlFor={id}
-                        className={`flex cursor-pointer items-center gap-3 rounded-full border px-4 py-2.5 text-sm transition-colors ${
-                          selected
-                            ? "border-foreground/25 bg-muted text-foreground"
-                            : "border-border/70 text-foreground/75 hover:border-border hover:text-foreground"
-                        }`}
-                      >
-                        <RadioGroupItem value={option.value} id={id} />
-                        <span className="font-medium">{option.label}</span>
-                      </label>
-                    );
-                  })}
-                </RadioGroup>
-              </div>
-
-              <div className="rounded-2xl bg-muted px-4 py-4">
-                <p className="text-base font-medium leading-6 text-foreground">
-                  {locationSummary}
-                </p>
-              </div>
-            </section>
+                  <div className="space-y-3">
+                    <p className="text-xs font-semibold uppercase tracking-[0.18em] text-muted-foreground">
+                      Match strictness
+                    </p>
+                    <RadioGroup
+                      value={matchStrictness}
+                      onValueChange={(value) =>
+                        setValue(
+                          "matchStrictness",
+                          value as LocationMatchStrictness,
+                          {
+                            shouldDirty: true,
+                          },
+                        )
+                      }
+                      className="gap-2"
+                    >
+                      {MATCH_STRICTNESS_OPTIONS.map((option) => {
+                        const id = `match-strictness-${option.value}`;
+                        const selected = matchStrictness === option.value;
+                        return (
+                          <label
+                            key={option.value}
+                            htmlFor={id}
+                            className={getRadioOptionClassName(selected)}
+                          >
+                            <RadioGroupItem value={option.value} id={id} />
+                            <span className="text-sm font-medium">
+                              {option.label}
+                            </span>
+                          </label>
+                        );
+                      })}
+                    </RadioGroup>
+                  </div>
+                </AccordionContent>
+              </AccordionItem>
+            </Accordion>
 
             <Accordion
               type="single"
@@ -713,54 +981,227 @@ export const AutomaticRunTab: React.FC<AutomaticRunTabProps> = ({
         </Card>
 
         <Card>
-          <CardHeader className="pb-3">
-            <CardTitle>
-              Sources ({compatiblePipelineSources.length}/
-              {compatibleEnabledSources.length})
-            </CardTitle>
+          <CardHeader className="pb-1">
+            <CardTitle>Sources</CardTitle>
           </CardHeader>
-          <CardContent className="flex flex-wrap gap-2">
-            <TooltipProvider>
-              {enabledSources.map((source) => {
-                const countryAllowed = isSourceAllowedForCountry(
-                  source,
-                  values.country,
-                );
-                const allowed = isSourceAvailableForRun(source);
-                const selected = compatiblePipelineSources.includes(source);
-                const disabledReason = getSourceDisabledReason(
-                  source,
-                  countryAllowed,
-                );
-
-                const button = (
-                  <Button
-                    key={source}
-                    type="button"
-                    size="sm"
-                    variant={selected ? "default" : "outline"}
-                    disabled={!allowed}
-                    title={!allowed ? disabledReason : undefined}
-                    onClick={() => onToggleSource(source, !selected)}
+          <CardContent className="space-y-3">
+            <Accordion type="single" collapsible className="w-full">
+              <AccordionItem value="sources" className="border-b-0">
+                <AccordionTrigger
+                  aria-label="Review and edit sources"
+                  className="gap-4 py-2 hover:no-underline"
+                >
+                  <motion.div
+                    layout
+                    transition={sourceMotionTransition}
+                    className="flex w-full flex-col gap-3 text-left sm:flex-row sm:items-center sm:justify-between"
                   >
-                    {sourceLabel[source]}
-                  </Button>
-                );
+                    <motion.div
+                      layout
+                      transition={sourceMotionTransition}
+                      className="min-w-0 space-y-1"
+                    >
+                      <p className="text-sm font-semibold text-foreground">
+                        {selectedSourceRows.length === 0
+                          ? "Choose sources for this run"
+                          : `${selectedSourceRows.length} source${selectedSourceRows.length === 1 ? "" : "s"} selected`}
+                      </p>
+                    </motion.div>
+                    <motion.div
+                      layout
+                      transition={sourceMotionTransition}
+                      className="flex shrink-0 flex-wrap gap-2"
+                    >
+                      <Badge variant="outline" className="rounded-full">
+                        {selectedSourceRows.length} selected
+                      </Badge>
+                      <Badge variant="outline" className="rounded-full">
+                        {
+                          sourceRows.filter((row) => row.status.available)
+                            .length
+                        }{" "}
+                        available
+                      </Badge>
+                      {unavailableSourceRows.length > 0 ? (
+                        <Badge variant="outline" className="rounded-full">
+                          {unavailableSourceRows.length} unavailable
+                        </Badge>
+                      ) : null}
+                    </motion.div>
+                  </motion.div>
+                </AccordionTrigger>
+                <AccordionContent className="pt-4">
+                  <motion.div
+                    initial={sourceSectionInitial}
+                    animate={sourceSectionAnimate}
+                    transition={sourceMotionTransition}
+                    className="space-y-5"
+                  >
+                    {selectedSourceRows.length > 0 ? (
+                      <motion.div
+                        layout
+                        transition={sourceMotionTransition}
+                        className="space-y-2"
+                      >
+                        <motion.p
+                          layout
+                          transition={sourceMotionTransition}
+                          className="text-xs font-semibold uppercase tracking-[0.18em] text-muted-foreground"
+                        >
+                          Selected
+                        </motion.p>
+                        <motion.div
+                          layout
+                          transition={sourceMotionTransition}
+                          className="grid gap-2 md:grid-cols-2"
+                        >
+                          <AnimatePresence initial={false} mode="popLayout">
+                            {selectedSourceRows.map((row) => (
+                              <motion.div
+                                key={row.source}
+                                layout
+                                initial={sourceRowInitial}
+                                animate={sourceSectionAnimate}
+                                exit={sourceRowExit}
+                                transition={sourceMotionTransition}
+                              >
+                                <Button
+                                  type="button"
+                                  variant="ghost"
+                                  aria-label={sourceLabel[row.source]}
+                                  aria-pressed
+                                  title="Included in this run."
+                                  className="flex h-auto w-full items-center justify-between gap-3 rounded-xl border border-primary/20 bg-primary/10 px-3 py-3 text-left text-foreground transition-colors duration-200 hover:bg-primary/15"
+                                  onClick={() =>
+                                    handleSourceToggle(row.source, false)
+                                  }
+                                >
+                                  <span className="min-w-0">
+                                    <span className="block text-sm font-semibold">
+                                      {sourceLabel[row.source]}
+                                    </span>
+                                  </span>
+                                </Button>
+                              </motion.div>
+                            ))}
+                          </AnimatePresence>
+                        </motion.div>
+                      </motion.div>
+                    ) : null}
 
-                if (allowed) {
-                  return button;
-                }
+                    {readySourceRows.length > 0 ? (
+                      <motion.div
+                        layout
+                        transition={sourceMotionTransition}
+                        className="space-y-2"
+                      >
+                        <motion.p
+                          layout
+                          transition={sourceMotionTransition}
+                          className="text-xs font-semibold uppercase tracking-[0.18em] text-muted-foreground"
+                        >
+                          Available
+                        </motion.p>
+                        <motion.div
+                          layout
+                          transition={sourceMotionTransition}
+                          className="grid gap-2 md:grid-cols-2"
+                        >
+                          <AnimatePresence initial={false} mode="popLayout">
+                            {readySourceRows.map((row) => (
+                              <motion.div
+                                key={row.source}
+                                layout
+                                initial={sourceRowInitial}
+                                animate={sourceSectionAnimate}
+                                exit={sourceRowExit}
+                                transition={sourceMotionTransition}
+                              >
+                                <Button
+                                  type="button"
+                                  variant="ghost"
+                                  aria-label={sourceLabel[row.source]}
+                                  aria-pressed={false}
+                                  title="Available for this location setup."
+                                  className="flex h-auto w-full items-center justify-between gap-3 rounded-xl border border-border/60 bg-background/60 px-3 py-3 text-left text-foreground transition-colors duration-200 hover:bg-muted/40"
+                                  onClick={() =>
+                                    handleSourceToggle(row.source, true)
+                                  }
+                                >
+                                  <span className="min-w-0">
+                                    <span className="block text-sm font-semibold">
+                                      {sourceLabel[row.source]}
+                                    </span>
+                                  </span>
+                                </Button>
+                              </motion.div>
+                            ))}
+                          </AnimatePresence>
+                        </motion.div>
+                      </motion.div>
+                    ) : null}
 
-                return (
-                  <Tooltip key={source}>
-                    <TooltipTrigger asChild>
-                      <span className="inline-flex">{button}</span>
-                    </TooltipTrigger>
-                    <TooltipContent side="top">{disabledReason}</TooltipContent>
-                  </Tooltip>
-                );
-              })}
-            </TooltipProvider>
+                    {unavailableSourceRows.length > 0 ? (
+                      <motion.div
+                        layout
+                        transition={sourceMotionTransition}
+                        className="space-y-2"
+                      >
+                        <motion.p
+                          layout
+                          transition={sourceMotionTransition}
+                          className="text-xs font-semibold uppercase tracking-[0.18em] text-muted-foreground"
+                        >
+                          Currently unavailable
+                        </motion.p>
+                        <motion.div
+                          layout
+                          transition={sourceMotionTransition}
+                          className="grid gap-2 md:grid-cols-2"
+                        >
+                          <AnimatePresence initial={false} mode="popLayout">
+                            {unavailableSourceRows.map((row) => (
+                              <motion.div
+                                key={row.source}
+                                layout
+                                initial={sourceRowInitial}
+                                animate={sourceSectionAnimate}
+                                exit={sourceRowExit}
+                                transition={sourceMotionTransition}
+                              >
+                                <Button
+                                  type="button"
+                                  variant="ghost"
+                                  disabled
+                                  aria-label={sourceLabel[row.source]}
+                                  title={row.status.detail}
+                                  className="flex h-auto w-full items-start justify-between gap-3 rounded-xl border border-border/50 bg-transparent px-3 py-3 text-left text-foreground/80 disabled:pointer-events-none disabled:opacity-100"
+                                >
+                                  <span className="min-w-0 space-y-1">
+                                    <span className="block text-sm font-semibold">
+                                      {sourceLabel[row.source]}
+                                    </span>
+                                    <span className="block text-xs leading-5 text-muted-foreground whitespace-pre-wrap">
+                                      {row.status.detail}
+                                    </span>
+                                  </span>
+                                  <Badge
+                                    variant="outline"
+                                    className="shrink-0 rounded-full px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-[0.18em]"
+                                  >
+                                    {row.status.badgeLabel}
+                                  </Badge>
+                                </Button>
+                              </motion.div>
+                            ))}
+                          </AnimatePresence>
+                        </motion.div>
+                      </motion.div>
+                    ) : null}
+                  </motion.div>
+                </AccordionContent>
+              </AccordionItem>
+            </Accordion>
           </CardContent>
         </Card>
       </div>

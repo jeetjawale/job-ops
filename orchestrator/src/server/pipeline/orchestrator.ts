@@ -11,11 +11,12 @@ import { join } from "node:path";
 import { logger } from "@infra/logger";
 import { trackServerProductEvent } from "@infra/product-analytics";
 import { runWithRequestContext } from "@infra/request-context";
+import { createLocationIntentFromLegacyInputs } from "@shared/location-domain.js";
 import type { PipelineConfig, PipelineRunSavedDetails } from "@shared/types";
 import { getDataDir } from "../config/dataDir";
 import * as jobsRepo from "../repositories/jobs";
 import * as pipelineRepo from "../repositories/pipeline";
-import { getSetting } from "../repositories/settings";
+import * as settingsRepo from "../repositories/settings";
 import { generatePdf } from "../services/pdf";
 import { getProfile } from "../services/profile";
 import { pickProjectIdsForJob } from "../services/projectSelection";
@@ -57,6 +58,39 @@ let isPipelineRunning = false;
 let activePipelineRunId: string | null = null;
 let cancelRequestedAt: string | null = null;
 
+function parseWorkplaceTypes(
+  raw: string | undefined,
+): Array<"remote" | "hybrid" | "onsite"> {
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter(
+      (value): value is "remote" | "hybrid" | "onsite" =>
+        value === "remote" || value === "hybrid" || value === "onsite",
+    );
+  } catch {
+    return [];
+  }
+}
+
+async function resolveLocationIntent(
+  config: Partial<PipelineConfig>,
+): Promise<NonNullable<PipelineConfig["locationIntent"]>> {
+  if (config.locationIntent) {
+    return createLocationIntentFromLegacyInputs(config.locationIntent);
+  }
+
+  const settings = await settingsRepo.getAllSettings();
+  return createLocationIntentFromLegacyInputs({
+    selectedCountry: settings.jobspyCountryIndeed ?? "",
+    searchCities: settings.searchCities ?? settings.jobspyLocation ?? "",
+    workplaceTypes: parseWorkplaceTypes(settings.workplaceTypes),
+    searchScope: settings.locationSearchScope,
+    matchStrictness: settings.locationMatchStrictness,
+  });
+}
+
 class PipelineCancelledError extends Error {
   constructor(message = "Pipeline cancellation requested") {
     super(message);
@@ -94,7 +128,15 @@ export async function runPipeline(
   activePipelineRunId = "pending";
   cancelRequestedAt = null;
   resetProgress();
-  const mergedConfig = { ...DEFAULT_CONFIG, ...config };
+  const locationIntent = await resolveLocationIntent(config);
+  const mergedConfig = { ...DEFAULT_CONFIG, ...config, locationIntent };
+  const configSnapshot = {
+    topN: mergedConfig.topN,
+    minSuitabilityScore: mergedConfig.minSuitabilityScore,
+    sources: mergedConfig.sources,
+    locationIntent,
+  } as const;
+
   let savedDetails: PipelineRunSavedDetails | null = null;
   try {
     savedDetails = await buildPipelineRunSavedDetails(mergedConfig);
@@ -103,6 +145,7 @@ export async function runPipeline(
   }
 
   const pipelineRun = await pipelineRepo.createPipelineRun({
+    configSnapshot,
     savedDetails,
   });
   activePipelineRunId = pipelineRun.id;
@@ -125,6 +168,7 @@ export async function runPipeline(
       topN: mergedConfig.topN,
       minSuitabilityScore: mergedConfig.minSuitabilityScore,
       sources: mergedConfig.sources,
+      locationIntent: mergedConfig.locationIntent,
     });
 
     try {
@@ -336,7 +380,8 @@ export async function summarizeJob(
         try {
           const { catalog, selectionItems } =
             extractProjectsFromProfile(profile);
-          const overrideResumeProjectsRaw = await getSetting("resumeProjects");
+          const overrideResumeProjectsRaw =
+            await settingsRepo.getSetting("resumeProjects");
           const { resumeProjects } = resolveResumeProjectsSettings({
             catalog,
             overrideRaw: overrideResumeProjectsRaw,

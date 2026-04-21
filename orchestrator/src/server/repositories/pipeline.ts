@@ -5,6 +5,7 @@
 import { randomUUID } from "node:crypto";
 import type {
   PipelineRun,
+  PipelineRunConfigSnapshot,
   PipelineRunInsights,
   PipelineRunResultSummary,
   PipelineRunSavedDetails,
@@ -25,6 +26,7 @@ function mapRowToPipelineRun(
     jobsDiscovered: row.jobsDiscovered,
     jobsProcessed: row.jobsProcessed,
     errorMessage: row.errorMessage,
+    configSnapshot: parseConfigSnapshot(row.configSnapshot),
   };
 }
 
@@ -45,10 +47,29 @@ function mapRowToSavedDetails(
   };
 }
 
+function serializeConfigSnapshot(
+  value: PipelineRunConfigSnapshot | null | undefined,
+): string | null {
+  if (!value) return null;
+  return JSON.stringify(value);
+}
+
+function parseConfigSnapshot(
+  value: string | null | undefined,
+): PipelineRunConfigSnapshot | null {
+  if (!value) return null;
+  try {
+    return JSON.parse(value) as PipelineRunConfigSnapshot;
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Create a new pipeline run.
  */
 export async function createPipelineRun(args?: {
+  configSnapshot?: PipelineRunConfigSnapshot | null;
   savedDetails?: PipelineRunSavedDetails | null;
 }): Promise<PipelineRun> {
   const id = randomUUID();
@@ -58,6 +79,7 @@ export async function createPipelineRun(args?: {
     id,
     startedAt: now,
     status: "running",
+    configSnapshot: serializeConfigSnapshot(args?.configSnapshot ?? null),
     requestedConfig: args?.savedDetails?.requestedConfig ?? null,
     effectiveConfig: args?.savedDetails?.effectiveConfig ?? null,
     resultSummary: args?.savedDetails?.resultSummary ?? null,
@@ -71,6 +93,7 @@ export async function createPipelineRun(args?: {
     jobsDiscovered: 0,
     jobsProcessed: 0,
     errorMessage: null,
+    configSnapshot: args?.configSnapshot ?? null,
   };
 }
 
@@ -85,10 +108,25 @@ export async function updatePipelineRun(
     jobsDiscovered: number;
     jobsProcessed: number;
     errorMessage: string;
+    configSnapshot: PipelineRunConfigSnapshot | null;
     resultSummary: PipelineRunResultSummary | null;
   }>,
 ): Promise<void> {
-  await db.update(pipelineRuns).set(update).where(eq(pipelineRuns.id, id));
+  const { configSnapshot, resultSummary, ...rest } = update;
+  await db
+    .update(pipelineRuns)
+    .set({
+      ...rest,
+      ...(Object.hasOwn(update, "configSnapshot")
+        ? {
+            configSnapshot: serializeConfigSnapshot(configSnapshot ?? null),
+          }
+        : {}),
+      ...(Object.hasOwn(update, "resultSummary")
+        ? { resultSummary: resultSummary ?? null }
+        : {}),
+    })
+    .where(eq(pipelineRuns.id, id));
 }
 
 /**
